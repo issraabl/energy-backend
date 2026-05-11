@@ -1,13 +1,17 @@
-﻿namespace EnergyTrackerr.Models
+﻿namespace EnergyTrackerr.Models;
+using System.Text.Json.Serialization;
+
+public class Site
 {
-    public class Site
-    {
-        public int IdSite { get; set; }
-        public string Name { get; set; } = "";
-        public string? Address { get; set; }
+    [JsonPropertyName("idSite")]
+    public int IdSite { get; set; }
 
-        public DateTime DateCreation { get; set; } = DateTime.Now;
+    [JsonPropertyName("nom")]
+    public string Name { get; set; } = "";
 
-        public ICollection<Zone> Zones { get; set; } = new List<Zone>();
-    }
+    [JsonPropertyName("adresse")]
+    public string? Address { get; set; }
+
+    public DateTime DateCreation { get; set; } = DateTime.Now;
+    public ICollection<Zone> Zones { get; set; } = new List<Zone>();
 }
