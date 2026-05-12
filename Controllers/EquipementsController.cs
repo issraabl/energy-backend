@@ -18,7 +18,7 @@ namespace EnergyTrackerr.Controllers
         }
 
         // GET: api/Equipements
-        [Authorize(Roles = "administrateur,responsable_electricite,responsable_eau,responsable_gaz,responsable_energie")]
+        [Authorize(Roles = "administrateur,responsable_electricite,responsable_eau,responsable_gaz")]
         [HttpGet]
         public async Task<ActionResult<IEnumerable<Equipement>>> GetEquipements()
         {
@@ -29,7 +29,7 @@ namespace EnergyTrackerr.Controllers
         }
 
         // GET: api/Equipements/5
-        [Authorize(Roles = "administrateur,responsable_electricite,responsable_eau,responsable_gaz,responsable_energie")]
+        [Authorize(Roles = "administrateur,responsable_electricite,responsable_eau,responsable_gaz")]
         [HttpGet("{id}")]
         public async Task<ActionResult<Equipement>> GetEquipement(int id)
         {
@@ -42,7 +42,7 @@ namespace EnergyTrackerr.Controllers
         }
 
         // POST: api/Equipements
-        [Authorize(Roles = "administrateur,responsable_electricite,responsable_eau,responsable_gaz,responsable_energie")]
+        [Authorize(Roles = "administrateur,responsable_electricite,responsable_eau,responsable_gaz")]
         [HttpPost]
         public async Task<ActionResult<Equipement>> CreateEquipement([FromBody] Equipement eq)
         {
@@ -60,7 +60,7 @@ namespace EnergyTrackerr.Controllers
         }
 
         // PUT: api/Equipements/5
-        [Authorize(Roles = "administrateur,responsable_electricite,responsable_eau,responsable_gaz,responsable_energie")]
+        [Authorize(Roles = "administrateur,responsable_electricite,responsable_eau,responsable_gaz")]
         [HttpPut("{id}")]
         public async Task<IActionResult> UpdateEquipement(int id, [FromBody] Equipement eq)
         {
@@ -73,7 +73,7 @@ namespace EnergyTrackerr.Controllers
 
             // ✅ Champs exacts du modèle Equipement
             existing.Nom = eq.Nom;
-            existing.TypeEquipement = eq.TypeEquipement;   // ← corrigé
+            existing.TypeEquipement = eq.TypeEquipement;   
             existing.Statut = eq.Statut;
             existing.Puissance = eq.Puissance;
             existing.Localisation = eq.Localisation;

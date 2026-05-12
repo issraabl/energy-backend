@@ -4,7 +4,9 @@ using EnergyTrackerr.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Globalization;
 using System.Security.Claims;
+using System.Text;
 
 namespace EnergyTrackerr.Controllers
 {
@@ -27,58 +29,123 @@ namespace EnergyTrackerr.Controllers
             _statistiqueService = statistiqueService;
         }
 
-        // ✅ GET — lecture autorisée pour tous les rôles connectés
-        // Le filtre par rôle est supprimé du GET pour permettre la consultation
-        // cross-énergie (ex: responsable_eau peut lire les données gaz/electricite).
-        // Les restrictions d'écriture restent sur POST/PUT/DELETE.
+        // =====================================================================
+        // NORMALISATION : supprime les accents et met en MAJUSCULES
+        // "Électricité" → "ELECTRICITE" | "Gazoil" → "GAZOIL"
+        // =====================================================================
+        private static string Normalize(string s)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return string.Empty;
+            var normalized = s.Normalize(NormalizationForm.FormD);
+            var sb = new StringBuilder(normalized.Length);
+            foreach (var c in normalized)
+                if (CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark)
+                    sb.Append(c);
+            return sb.ToString().ToUpperInvariant();
+        }
+
+        // =====================================================================
+        // MAPPING rôle → noms énergie normalisés autorisés (liste pour couvrir
+        // les variantes : "Gaz", "Gazoil", "Gaz naturel", etc.)
+        // =====================================================================
+        private static readonly Dictionary<string, HashSet<string>> RoleEnergieMap = new()
+        {
+            ["responsable_electricite"] = new() { "ELECTRICITE" },
+            ["responsable_gaz"] = new() { "GAZ", "GAZOIL", "GAZ NATUREL", "GAZ DE VILLE" },
+            ["responsable_eau"] = new() { "EAU", "EAU POTABLE", "EAU FROIDE", "EAU CHAUDE" },
+        };
+
+        // =====================================================================
+        // VÉRIFICATION rôle ↔ énergie — avec logs complets
+        // =====================================================================
+        private async Task<bool> RoleMatchesEnergie(string? role, int energieId)
+        {
+            Console.WriteLine($"[AUTH] RoleMatchesEnergie → role='{role}' | energieId={energieId}");
+
+            if (string.IsNullOrWhiteSpace(role))
+            {
+                Console.WriteLine("[AUTH] ECHEC : role est null ou vide");
+                return false;
+            }
+
+            // Accès total
+            if (role == "administrateur" || role == "responsable_energie")
+            {
+                Console.WriteLine("[AUTH] OK : Acces total (admin/responsable_energie)");
+                return true;
+            }
+
+            var energie = await _context.Energies.FindAsync(energieId);
+            if (energie == null)
+            {
+                Console.WriteLine($"[AUTH] ECHEC : Aucune energie trouvee pour id={energieId}");
+                return false;
+            }
+
+            var nomBdd = Normalize(energie.Nom);
+            Console.WriteLine($"[AUTH] Energie BDD : brut='{energie.Nom}' | normalise='{nomBdd}'");
+
+            // Cherche le rôle dans la map
+            if (!RoleEnergieMap.TryGetValue(role, out var nomsAutorises))
+            {
+                Console.WriteLine($"[AUTH] ECHEC : Role '{role}' non reconnu dans RoleEnergieMap");
+                return false;
+            }
+
+            var match = nomsAutorises.Contains(nomBdd);
+            Console.WriteLine($"[AUTH] Noms autorises pour '{role}': [{string.Join(", ", nomsAutorises)}]");
+            Console.WriteLine($"[AUTH] Comparaison '{nomBdd}' in liste → {(match ? "OK" : "ECHEC")}");
+
+            return match;
+        }
+
+        // =====================================================================
+        // HELPER : cherche une énergie par nom (insensible aux accents/casse)
+        // =====================================================================
+        private async Task<Energie?> FindEnergieByNom(string nom)
+        {
+            var nomNormalized = Normalize(nom);
+            Console.WriteLine($"[FIND] Recherche energie : brut='{nom}' | normalise='{nomNormalized}'");
+
+            var energies = await _context.Energies.ToListAsync();
+
+            Console.WriteLine("[FIND] Energies disponibles en BDD :");
+            foreach (var e in energies)
+                Console.WriteLine($"  id={e.IdEnergie} | brut='{e.Nom}' | normalise='{Normalize(e.Nom)}'");
+
+            var found = energies.FirstOrDefault(e => Normalize(e.Nom) == nomNormalized);
+            Console.WriteLine($"[FIND] Resultat : {(found != null ? $"TROUVE id={found.IdEnergie}" : "NON TROUVE")}");
+
+            return found;
+        }
+
+        // =====================================================================
+        // GET /api/mesures
+        // =====================================================================
         [Authorize(Roles = "administrateur,responsable_electricite,responsable_gaz,responsable_eau,responsable_energie")]
         [HttpGet]
-        public async Task<ActionResult<IEnumerable<MesureReadDto>>> GetMesures([FromQuery] int? energieId)
+        public async Task<ActionResult<IEnumerable<MesureReadDto>>> GetMesures([FromQuery] string? energieNom)
         {
-            var role = User.FindFirst(ClaimTypes.Role)?.Value;
-
             var query = _context.Mesures
                 .Include(m => m.Energie)
                 .Include(m => m.Equipement)
                 .AsQueryable();
 
-            // ✅ FIX : on ne filtre PAS par rôle ici.
-            // Tous les utilisateurs authentifiés peuvent lire toutes les mesures,
-            // mais uniquement via le paramètre energieId pour cibler un vecteur.
-            // Si energieId est fourni, on filtre ; sinon on retourne tout
-            // (utile pour l'admin et le responsable_energie).
-            if (energieId.HasValue)
-                query = query.Where(m => m.EnergieId == energieId.Value);
+            if (!string.IsNullOrWhiteSpace(energieNom))
+            {
+                var nomNormalized = Normalize(energieNom);
+                var all = await query.ToListAsync();
+                all = all.Where(m => Normalize(m.Energie!.Nom) == nomNormalized).ToList();
+                return Ok(MapToDtos(all));
+            }
 
             var mesures = await query.ToListAsync();
-
-            var dtos = mesures.Select(m => new MesureReadDto
-            {
-                IdMesure = m.IdMesure,
-                Valeur = m.Valeur,
-                DateMesure = m.DateMesure,
-                DateCreation = m.DateCreation,
-                SourceDonnee = m.SourceDonnee,
-                EnergieId = m.EnergieId,
-                EquipementId = m.EquipementId,
-                Energie = new EnergieDto
-                {
-                    IdEnergie = m.Energie!.IdEnergie,
-                    Nom = m.Energie.Nom,
-                    Unite = m.Energie.Unite
-                },
-                Equipement = m.Equipement == null ? null : new EquipementDto
-                {
-                    IdEquipement = m.Equipement.IdEquipement,
-                    Nom = m.Equipement.Nom,
-                    TypeEquipement = m.Equipement.TypeEquipement
-                }
-            }).ToList();
-
-            return Ok(dtos);
+            return Ok(MapToDtos(mesures));
         }
 
-        // ✅ GET par ID — lecture autorisée pour tous les rôles connectés
+        // =====================================================================
+        // GET /api/mesures/{id}
+        // =====================================================================
         [Authorize(Roles = "administrateur,responsable_electricite,responsable_gaz,responsable_eau,responsable_energie")]
         [HttpGet("{id}")]
         public async Task<ActionResult<MesureReadDto>> GetMesure(int id)
@@ -88,48 +155,47 @@ namespace EnergyTrackerr.Controllers
                 .Include(m => m.Equipement)
                 .FirstOrDefaultAsync(m => m.IdMesure == id);
 
-            if (m == null)
-                return NotFound();
+            if (m == null) return NotFound();
 
-            return Ok(new MesureReadDto
-            {
-                IdMesure = m.IdMesure,
-                Valeur = m.Valeur,
-                DateMesure = m.DateMesure,
-                DateCreation = m.DateCreation,
-                SourceDonnee = m.SourceDonnee,
-                EnergieId = m.EnergieId,
-                EquipementId = m.EquipementId,
-                Energie = new EnergieDto
-                {
-                    IdEnergie = m.Energie!.IdEnergie,
-                    Nom = m.Energie.Nom,
-                    Unite = m.Energie.Unite
-                },
-                Equipement = m.Equipement == null ? null : new EquipementDto
-                {
-                    IdEquipement = m.Equipement.IdEquipement,
-                    Nom = m.Equipement.Nom,
-                    TypeEquipement = m.Equipement.TypeEquipement
-                }
-            });
+            return Ok(MapToDto(m));
         }
 
-        // ✅ POST — écriture réservée au responsable de l'énergie concernée + admin
+        // =====================================================================
+        // POST /api/mesures
+        // =====================================================================
         [Authorize(Roles = "administrateur,responsable_electricite,responsable_gaz,responsable_eau,responsable_energie")]
         [HttpPost]
         public async Task<ActionResult> CreateMesure([FromBody] MesureCreateDto dto)
         {
-            var role = User.FindFirst(ClaimTypes.Role)?.Value;
+            if (dto == null)
+                return BadRequest("DTO invalide.");
 
-            // Vérifier que le responsable crée uniquement dans son énergie
-            if (role == "responsable_electricite" && dto.EnergieId != 1) return Forbid();
-            if (role == "responsable_gaz" && dto.EnergieId != 2) return Forbid();
-            if (role == "responsable_eau" && dto.EnergieId != 3) return Forbid();
+            // ── LOGS DE DEBUG ─────────────────────────────────────────────────
+            var role = User.FindAll(ClaimTypes.Role).Select(c => c.Value).FirstOrDefault();
+            var allClaims = User.Claims.Select(c => $"{c.Type}={c.Value}").ToList();
 
-            var energie = await _context.Energies.FindAsync(dto.EnergieId);
+            Console.WriteLine("==================================================");
+            Console.WriteLine("[POST] CreateMesure appele");
+            Console.WriteLine($"[POST] EnergieNom recu : '{dto.EnergieNom}'");
+            Console.WriteLine($"[POST] Valeur recue    : {dto.Valeur}");
+            Console.WriteLine($"[POST] Role extrait    : '{role}'");
+            Console.WriteLine($"[POST] Tous les claims : {string.Join(" | ", allClaims)}");
+            Console.WriteLine("==================================================");
+            // ──────────────────────────────────────────────────────────────────
+
+            if (string.IsNullOrWhiteSpace(dto.EnergieNom))
+                return BadRequest("EnergieNom est requis.");
+
+            var energie = await FindEnergieByNom(dto.EnergieNom);
+
             if (energie == null)
-                return BadRequest($"Aucune Energie trouvée avec Id = {dto.EnergieId}");
+                return BadRequest($"Aucune energie trouvee pour le nom '{dto.EnergieNom}'.");
+
+            if (!await RoleMatchesEnergie(role, energie.IdEnergie))
+            {
+                Console.WriteLine($"[POST] 403 Forbid → role='{role}' ne peut pas gerer energieId={energie.IdEnergie} ('{energie.Nom}')");
+                return Forbid();
+            }
 
             var mesure = new Mesure
             {
@@ -137,12 +203,14 @@ namespace EnergyTrackerr.Controllers
                 DateMesure = dto.DateMesure,
                 DateCreation = DateTime.Now,
                 SourceDonnee = dto.SourceDonnee,
-                EnergieId = dto.EnergieId,
+                EnergieId = energie.IdEnergie,
                 EquipementId = dto.EquipementId
             };
 
             _context.Mesures.Add(mesure);
             await _context.SaveChangesAsync();
+
+            Console.WriteLine($"[POST] Mesure creee id={mesure.IdMesure}");
 
             await _alerteService.VerifierMesureEtCreerAlerte(mesure);
             await _statistiqueService.VerifierMesureEtCreerAlerteStatistique(mesure);
@@ -150,58 +218,110 @@ namespace EnergyTrackerr.Controllers
             return CreatedAtAction(nameof(GetMesure), new { id = mesure.IdMesure }, mesure);
         }
 
-        // ✅ PUT — chaque responsable modifie uniquement son énergie
+        // =====================================================================
+        // PUT /api/mesures/{id}
+        // =====================================================================
         [Authorize(Roles = "administrateur,responsable_electricite,responsable_gaz,responsable_eau,responsable_energie")]
         [HttpPut("{id}")]
         public async Task<IActionResult> UpdateMesure(int id, [FromBody] MesureCreateDto dto)
         {
-            var role = User.FindFirst(ClaimTypes.Role)?.Value;
+            if (dto == null)
+                return BadRequest("DTO invalide.");
+
+            var role = User.FindAll(ClaimTypes.Role).Select(c => c.Value).FirstOrDefault();
+
+            Console.WriteLine($"[PUT] UpdateMesure id={id} | role='{role}' | EnergieNom='{dto.EnergieNom}'");
 
             var mesure = await _context.Mesures.FindAsync(id);
-            if (mesure == null)
-                return NotFound();
+            if (mesure == null) return NotFound();
 
-            // Vérifier que le responsable modifie uniquement son énergie
-            if (role == "responsable_electricite" && mesure.EnergieId != 1) return Forbid();
-            if (role == "responsable_gaz" && mesure.EnergieId != 2) return Forbid();
-            if (role == "responsable_eau" && mesure.EnergieId != 3) return Forbid();
+            if (!await RoleMatchesEnergie(role, mesure.EnergieId))
+            {
+                Console.WriteLine($"[PUT] 403 Forbid sur energieId actuel={mesure.EnergieId}");
+                return Forbid();
+            }
 
-            // Empêcher de changer l'énergie vers une autre
-            if (role == "responsable_electricite" && dto.EnergieId != 1) return Forbid();
-            if (role == "responsable_gaz" && dto.EnergieId != 2) return Forbid();
-            if (role == "responsable_eau" && dto.EnergieId != 3) return Forbid();
+            if (!string.IsNullOrWhiteSpace(dto.EnergieNom))
+            {
+                var energie = await FindEnergieByNom(dto.EnergieNom);
+
+                if (energie == null)
+                    return BadRequest($"Aucune energie trouvee pour le nom '{dto.EnergieNom}'.");
+
+                if (!await RoleMatchesEnergie(role, energie.IdEnergie))
+                {
+                    Console.WriteLine($"[PUT] 403 Forbid sur nouvelle energieId={energie.IdEnergie}");
+                    return Forbid();
+                }
+
+                mesure.EnergieId = energie.IdEnergie;
+            }
 
             mesure.Valeur = dto.Valeur;
             mesure.DateMesure = dto.DateMesure;
             mesure.SourceDonnee = dto.SourceDonnee;
-            mesure.EnergieId = dto.EnergieId;
             mesure.EquipementId = dto.EquipementId;
 
             await _context.SaveChangesAsync();
 
+            Console.WriteLine($"[PUT] Mesure {id} mise a jour");
             return NoContent();
         }
 
-        // ✅ DELETE — chaque responsable supprime uniquement son énergie
+        // =====================================================================
+        // DELETE /api/mesures/{id}
+        // =====================================================================
         [Authorize(Roles = "administrateur,responsable_electricite,responsable_gaz,responsable_eau,responsable_energie")]
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteMesure(int id)
         {
-            var role = User.FindFirst(ClaimTypes.Role)?.Value;
+            var role = User.FindAll(ClaimTypes.Role).Select(c => c.Value).FirstOrDefault();
+
+            Console.WriteLine($"[DELETE] DeleteMesure id={id} | role='{role}'");
 
             var mesure = await _context.Mesures.FindAsync(id);
-            if (mesure == null)
-                return NotFound();
+            if (mesure == null) return NotFound();
 
-            // Vérifier que le responsable supprime uniquement son énergie
-            if (role == "responsable_electricite" && mesure.EnergieId != 1) return Forbid();
-            if (role == "responsable_gaz" && mesure.EnergieId != 2) return Forbid();
-            if (role == "responsable_eau" && mesure.EnergieId != 3) return Forbid();
+            if (!await RoleMatchesEnergie(role, mesure.EnergieId))
+            {
+                Console.WriteLine($"[DELETE] 403 Forbid sur energieId={mesure.EnergieId}");
+                return Forbid();
+            }
 
             _context.Mesures.Remove(mesure);
             await _context.SaveChangesAsync();
 
+            Console.WriteLine($"[DELETE] Mesure {id} supprimee");
             return NoContent();
         }
+
+        // =====================================================================
+        // MAPPERS PRIVÉS
+        // =====================================================================
+        private static IEnumerable<MesureReadDto> MapToDtos(IEnumerable<Mesure> mesures)
+            => mesures.Select(MapToDto);
+
+        private static MesureReadDto MapToDto(Mesure m) => new MesureReadDto
+        {
+            IdMesure = m.IdMesure,
+            Valeur = m.Valeur,
+            DateMesure = m.DateMesure,
+            DateCreation = m.DateCreation,
+            SourceDonnee = m.SourceDonnee,
+            EnergieId = m.EnergieId,
+            EquipementId = m.EquipementId,
+            Energie = new EnergieDto
+            {
+                IdEnergie = m.Energie!.IdEnergie,
+                Nom = m.Energie.Nom,
+                Unite = m.Energie.Unite
+            },
+            Equipement = m.Equipement == null ? null : new EquipementDto
+            {
+                IdEquipement = m.Equipement.IdEquipement,
+                Nom = m.Equipement.Nom,
+                TypeEquipement = m.Equipement.TypeEquipement
+            }
+        };
     }
 }

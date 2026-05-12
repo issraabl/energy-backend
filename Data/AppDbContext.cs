@@ -28,6 +28,7 @@ namespace EnergyTrackerr.Data
         public DbSet<Notfication> Notifications { get; set; }
         public DbSet<Anomalie> Anomalies { get; set; }
         public DbSet<Seuil> Seuils { get; set; }
+        public DbSet<EnergieGenerique> EnergiesGeneriques { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -66,7 +67,8 @@ namespace EnergyTrackerr.Data
                 .HasDiscriminator<string>("EnergieType")
                 .HasValue<Electricite>("Electricite")
                 .HasValue<Gasoil>("Gasoil")
-            .HasValue<Eau>("Eau");
+            .HasValue<Eau>("Eau")
+            .HasValue<EnergieGenerique>("EnergieGenerique");
 
             modelBuilder.Entity<Notfication>()
     .HasOne(n => n.Utilisateur)

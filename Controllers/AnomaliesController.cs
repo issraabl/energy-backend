@@ -18,14 +18,14 @@ namespace EnergyTrackerr.Controllers
             _anomalieService = anomalieService;
         }
         [HttpGet]
-        [Authorize(Roles = "administrateur,responsable_electricite,responsable_gaz,responsable_eau,responsable_energie")]
+        [Authorize(Roles = "administrateur,responsable_electricite,responsable_gaz,responsable_eau")]
         public async Task<IActionResult> GetAll()
         {
             var anomalies = await _anomalieService.GetAllAsync();
             return Ok(anomalies);
         }
         //  GET api/Anomalies/mesure/5
-        [Authorize(Roles = "administrateur,responsable_electricite,responsable_gaz,responsable_eau,responsable_energie")]
+        [Authorize(Roles = "administrateur,responsable_electricite,responsable_gaz,responsable_eau,")]
         [HttpGet("mesure/{mesureId}")]
         public async Task<IActionResult> AnalyserMesure(
             int mesureId,
@@ -50,7 +50,7 @@ namespace EnergyTrackerr.Controllers
         }
 
         //  GET api/Anomalies/equipement/5
-        [Authorize(Roles = "administrateur,responsable_electricite,responsable_gaz,responsable_eau,responsable_energie")]
+        [Authorize(Roles = "administrateur,responsable_electricite,responsable_gaz,responsable_eau")]
         [HttpGet("equipement/{equipementId}")]
         public async Task<IActionResult> AnalyserEquipement(
             int equipementId,
@@ -72,7 +72,7 @@ namespace EnergyTrackerr.Controllers
         }
 
         //  GET api/Anomalies/periode
-        [Authorize(Roles = "administrateur,responsable_electricite,responsable_gaz,responsable_eau,responsable_energie")]
+        [Authorize(Roles = "administrateur,responsable_electricite,responsable_gaz,responsable_eau")]
         [HttpGet("periode")]
         public async Task<IActionResult> AnalyserPeriode(
             [FromQuery] DateTime debut,
@@ -95,7 +95,7 @@ namespace EnergyTrackerr.Controllers
 
         //  POST api/Anomalies/detecter-et-alerter
         [HttpPost("detecter-et-alerter")]
-        [Authorize(Roles = "administrateur,responsable_energie")]
+        [Authorize(Roles = "administrateur")]
         public async Task<IActionResult> DetecterEtAlerter(
             [FromBody] ParametresDetectionDto? parametres = null)
         {

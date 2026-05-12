@@ -4,7 +4,7 @@
     public DateTime DateMesure { get; set; }
     public string SourceDonnee { get; set; } = string.Empty;
     public string? Commentaire { get; set; }  // ✅ ajouté
-    public int EnergieId { get; set; }
+    public string EnergieNom { get; set; } = string.Empty;
     public int? EquipementId { get; set; }
 }
 
