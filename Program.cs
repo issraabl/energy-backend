@@ -18,6 +18,7 @@ builder.Services.AddScoped<AlerteService>();
 builder.Services.AddScoped<EmailService>();
 builder.Services.AddScoped<StatistiqueService>();
 builder.Services.AddScoped<IAnomalieService, AnomalieService>();
+builder.Services.AddScoped<ExcelImportService>();
 // ================= HTTP CLIENT =================
 builder.Services.AddHttpClient<OllamaService>((sp, client) =>
 {
